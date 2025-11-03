@@ -291,7 +291,7 @@ class Spec2Pep(pl.LightningModule):
         -------
         scores : torch.Tensor of shape (n_spectra, length, n_amino_acids)
             The individual amino acid scores for each prediction.
-        tokens : torch.Tensor of shape (n_spectra, length)
+        seqs : torch.Tensor of shape (n_spectra, length)
             The ground truth tokens for training, or zeros for inference.
         """
         mzs, ints, precursors, seqs = self._process_batch(batch)
@@ -299,16 +299,7 @@ class Spec2Pep(pl.LightningModule):
         
         # NON AUTOREGRESSIVE:
         if seqs is not None:
-            # Training/Validation: use zeros with same shape as ground truth
             zero_tokens = torch.zeros_like(seqs)
-        else:
-            # Inference: create zeros with max_peptide_len
-            batch_size = mzs.shape[0]
-            zero_tokens = torch.zeros(
-                (batch_size, self.max_peptide_len),
-                dtype=torch.long,
-                device=precursors.device,
-            )
         
         scores = self.decoder(
             tokens=zero_tokens,
@@ -346,7 +337,9 @@ class Spec2Pep(pl.LightningModule):
         """
 
         pred, truth = self._forward_step(batch)
-        pred = pred[:, :-1, :].reshape(-1, self.vocab_size)
+
+        pred = pred.reshape(-1, self.vocab_size)
+        
         if mode == "train":
             loss = self.celoss(pred, truth.flatten())
         else:
