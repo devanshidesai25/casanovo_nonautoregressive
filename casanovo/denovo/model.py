@@ -21,13 +21,6 @@ from . import evaluate
 
 logger = logging.getLogger("casanovo")
 
-# class FullAttentionDecoder(PeptideDecoder):
-#     def __init__(self, *args, **kwargs):
-#         super().__init__(*args, **kwargs)
-    
-#     def generate_tgt_mask(self, sz):
-#         """Override to return a mask of all false values."""
-#         return torch.zeros(sz, sz, dtype=torch.bool)
 
 class Spec2Pep(pl.LightningModule):
     """
