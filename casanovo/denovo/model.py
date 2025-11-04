@@ -446,26 +446,23 @@ class Spec2Pep(pl.LightningModule):
             precursors=precursors,
         )
 
-        # Apply terminal modification masking
         B, L, V = logits.shape
         nterm_idx = self.nterm_idx.to(device)
 
         if not self.tokenizer.reverse:  # N→C decoding (reverse=False)
             if L > 1:
                 for idx in nterm_idx:
-                    logits[:, 1:, idx] = -1e9  # N-term mods only at position 0 ✓
+                    logits[:, 1:, idx] = -1e9  
 
-        # Sample tokens
         predicted_tokens = logits.argmax(dim=-1)
         per_aa_conf = torch.softmax(logits, dim=-1).max(dim=-1).values
 
         # POST-PROCESS: Fix C→N decoding (reverse=True)
         if self.tokenizer.reverse:
             for i in range(batch_size):
-                # Find stop token position
-                stop_pos = self.max_peptide_len
+                stop_pos = None
                 for j, token in enumerate(predicted_tokens[i]):
-                    if token == self.stop_token or token == 0:
+                    if token == self.stop_token:
                         stop_pos = j
                         break
                 
