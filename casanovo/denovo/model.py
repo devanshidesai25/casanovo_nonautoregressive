@@ -446,82 +446,99 @@ class Spec2Pep(pl.LightningModule):
             precursors=precursors,
         )
 
-        # Apply N-terminal modification masking
+        # Apply terminal modification masking
         B, L, V = logits.shape
         nterm_idx = self.nterm_idx.to(device)
-        
-        if self.tokenizer.reverse:
-            # N-term mods only allowed at last position
-            if L > 1:
-                for idx in nterm_idx:
-                    logits[:, :-1, idx] = -1e9  # Mask all positions except last
-        else:
-            # N-term mods only allowed at first position
-            if L > 1:
-                for idx in nterm_idx:
-                    logits[:, 1:, idx] = -1e9  # Mask all positions except first
 
-        predicted_tokens = torch.argmax(logits, dim=-1)  # (B, L)
-        per_aa_conf = torch.softmax(logits, dim=-1).max(-1).values  # (B, L)
+        if not self.tokenizer.reverse:  # N→C decoding (reverse=False)
+            if L > 1:
+                for idx in nterm_idx:
+                    logits[:, 1:, idx] = -1e9  # N-term mods only at position 0 ✓
+
+        # Sample tokens
+        predicted_tokens = logits.argmax(dim=-1)
+        per_aa_conf = torch.softmax(logits, dim=-1).max(dim=-1).values
+
+        # POST-PROCESS: Fix C→N decoding (reverse=True)
+        if self.tokenizer.reverse:
+            for i in range(batch_size):
+                # Find stop token position
+                stop_pos = self.max_peptide_len
+                for j, token in enumerate(predicted_tokens[i]):
+                    if token == self.stop_token or token == 0:
+                        stop_pos = j
+                        break
+                
+                # N-term mods only valid at last position before stop (stop_pos-1)
+                # Check all positions EXCEPT the last valid position
+                for j in range(stop_pos - 1):
+                    if predicted_tokens[i, j].item() in nterm_idx:
+                        # Found invalid N-term mod - replace with next best token
+                        masked_logits = logits[i, j].clone()
+                        for idx in nterm_idx:
+                            masked_logits[idx] = float('-inf')
+                        predicted_tokens[i, j] = masked_logits.argmax()
+                        per_aa_conf[i, j] = torch.softmax(masked_logits, dim=0).max()
 
         predictions = []
-        with open("nonar_predictions.csv", "a") as out:
-            for (
-                filename,
-                scan,
-                precursor_charge,
-                precursor_mz,
-                tokens,
-                aa_scores,
-            ) in zip(
-                batch["peak_file"],
-                batch["scan_id"],
-                batch["precursor_charge"],
-                batch["precursor_mz"],
-                predicted_tokens,
-                per_aa_conf,
-            ):
-                # Find stop token or end of sequence
-                stop_pos = self.max_peptide_len
-                for i, token in enumerate(tokens):
-                    if token == self.stop_token or token == 0:
-                        stop_pos = i
-                        break
 
-                valid_tokens = tokens[:stop_pos]
-                valid_scores = aa_scores[:stop_pos].detach().cpu().numpy()
-                
-                if len(valid_tokens) == 0:
-                    continue
-
-                # Detokenize
-                peptide = "".join(
-                    self.tokenizer.detokenize(torch.unsqueeze(valid_tokens, 0), join=False)[0]
-                )
-
-                # Peptide score
-                peptide_score = float(np.mean(valid_scores))
-
-                # Reverse if needed
-                if self.tokenizer.reverse:
-                    valid_scores = valid_scores[::-1]
-                valid_scores_list = valid_scores.tolist()
-
-                # Create PSM
-                spec_match = psm.PepSpecMatch(
-                    sequence=peptide,
-                    spectrum_id=(filename, scan),
-                    peptide_score=peptide_score,
-                    charge=int(precursor_charge),
-                    calc_mz=np.nan,
-                    exp_mz=precursor_mz.item(),
-                    aa_scores=valid_scores,
-                )
-                predictions.append(spec_match)
-
-                # CSV debug output
-                trimmed_conf_str = str(valid_scores_list).replace(",", ";")
-                scan_str = str(scan).split("\n")[-1] if "\n" in str(scan) else str(scan)
+        for (
+            filename,
+            scan,
+            precursor_charge,
+            precursor_mz,
+            tokens,
+            aa_scores,
+        ) in zip(
+            batch["peak_file"],
+            batch["scan_id"],
+            batch["precursor_charge"],
+            batch["precursor_mz"],
+            predicted_tokens,
+            per_aa_conf,
+        ):
+            # Find stop token or end of sequence
+            stop_pos = self.max_peptide_len
+            for i, token in enumerate(tokens):
+                if token == self.stop_token or token == 0:
+                    stop_pos = i
+                    break
+            
+            valid_tokens = tokens[:stop_pos]
+            valid_scores = aa_scores[:stop_pos].detach().cpu().numpy()
+            
+            if len(valid_tokens) == 0:
+                continue
+            
+            # Detokenize
+            peptide = "".join(
+                self.tokenizer.detokenize(torch.unsqueeze(valid_tokens, 0), join=False)[0]
+            )
+            
+            # Peptide score
+            peptide_score = float(np.mean(valid_scores))
+            
+            # Reverse if needed
+            if self.tokenizer.reverse:
+                valid_scores = valid_scores[::-1]
+            valid_scores_list = valid_scores.tolist()
+            
+            # Create PSM
+            spec_match = psm.PepSpecMatch(
+                sequence=peptide,
+                spectrum_id=(filename, scan),
+                peptide_score=peptide_score,
+                charge=int(precursor_charge),
+                calc_mz=np.nan,
+                exp_mz=precursor_mz.item(),
+                aa_scores=valid_scores,
+            )
+            predictions.append(spec_match)
+            
+            trimmed_conf_str = str(valid_scores_list).replace(",", ";")
+            scan_str = str(scan).split("\n")[-1] if "\n" in str(scan) else str(scan)
+            
+            with open("nonar_predictions.csv", "a") as out:
                 out.write(f"{scan_str}, {peptide}, {peptide_score}, {trimmed_conf_str}\n")
 
         return predictions
