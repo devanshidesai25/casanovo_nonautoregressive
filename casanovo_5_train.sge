@@ -1,0 +1,23 @@
+#!/bin/bash
+#$ -N casanovo_5_train
+#$ -cwd
+#$ -o casanovo_5_train_nonAR.out
+#$ -e casanovo_5_train_nonAR.err
+#$ -l mfree=120G,cuda=1,gpgpu=TRUE
+#$ -V
+
+
+RUN_DIR=/net/noble/vol1/home/ddesai22/casanovo_runs/run_$(date +%Y%m%d_%H%M%S)
+mkdir -p "$RUN_DIR"
+cd "$RUN_DIR"
+
+source /net/noble/vol1/home/ddesai22/anaconda3/etc/profile.d/conda.sh
+conda activate casanovo_5
+
+echo "Conda environment:"
+which python
+which casanovo
+
+casanovo train \
+  --validation_peak_path /net/noble/vol1/home/gstrau2/data/downsample_splits/multienzymeds.val.unimod.mgf \
+  /net/noble/vol1/home/gstrau2/data/downsample_splits/multienzymeds.train.shuffled.unimod.mgf 
