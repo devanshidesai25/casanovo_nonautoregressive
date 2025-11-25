@@ -131,7 +131,7 @@ class PeptideDecoder(AnalyteTransformerDecoder):
         # Handle tokens==None like the base class
         if tokens is None:
             tokens = torch.tensor([[]]).to(self.device)
-        
+
         # length after adding global token
         L = tokens.shape[1] + 1
 
@@ -148,7 +148,6 @@ class PeptideDecoder(AnalyteTransformerDecoder):
             **kwargs,
         )
 
-        
 
 class SpectrumEncoder(SpectrumTransformerEncoder):
     """

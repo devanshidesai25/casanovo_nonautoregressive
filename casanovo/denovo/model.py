@@ -296,18 +296,18 @@ class Spec2Pep(pl.LightningModule):
         """
         mzs, ints, precursors, seqs = self._process_batch(batch)
         memories, mem_masks = self.encoder(mzs, ints)
-        
+
         # NON AUTOREGRESSIVE:
         if seqs is not None:
             zero_tokens = torch.zeros_like(seqs)
-        
+
         scores = self.decoder(
             tokens=zero_tokens,
             memory=memories,
             memory_key_padding_mask=mem_masks,
             precursors=precursors,
         )
-        
+
         return scores, seqs
 
     def training_step(
@@ -337,13 +337,13 @@ class Spec2Pep(pl.LightningModule):
         """
 
         pred, truth = self._forward_step(batch)
-    
+
         batch_size, seq_len = truth.shape
-        pred = pred[:, :seq_len, :]  
-    
+        pred = pred[:, :seq_len, :]
+
         pred = pred.reshape(-1, self.vocab_size)
         truth = truth.flatten()
-        
+
         if mode == "train":
             loss = self.celoss(pred, truth.flatten())
         else:
@@ -456,7 +456,7 @@ class Spec2Pep(pl.LightningModule):
         if not self.tokenizer.reverse:  # N→C decoding (reverse=False)
             if L > 1:
                 for idx in nterm_idx:
-                    logits[:, 1:, idx] = -1e9  
+                    logits[:, 1:, idx] = -1e9
 
         predicted_tokens = logits.argmax(dim=-1)
         per_aa_conf = torch.softmax(logits, dim=-1).max(dim=-1).values
@@ -469,7 +469,7 @@ class Spec2Pep(pl.LightningModule):
                     if token == self.stop_token:
                         stop_pos = j
                         break
-                
+
                 # N-term mods only valid at last position before stop (stop_pos-1)
                 # Check all positions EXCEPT the last valid position
                 for j in range(stop_pos - 1):
@@ -477,9 +477,11 @@ class Spec2Pep(pl.LightningModule):
                         # Found invalid N-term mod - replace with next best token
                         masked_logits = logits[i, j].clone()
                         for idx in nterm_idx:
-                            masked_logits[idx] = float('-inf')
+                            masked_logits[idx] = float("-inf")
                         predicted_tokens[i, j] = masked_logits.argmax()
-                        per_aa_conf[i, j] = torch.softmax(masked_logits, dim=0).max()
+                        per_aa_conf[i, j] = torch.softmax(
+                            masked_logits, dim=0
+                        ).max()
 
         predictions = []
 
@@ -504,26 +506,28 @@ class Spec2Pep(pl.LightningModule):
                 if token == self.stop_token or token == 0:
                     stop_pos = i
                     break
-            
+
             valid_tokens = tokens[:stop_pos]
             valid_scores = aa_scores[:stop_pos].detach().cpu().numpy()
-            
+
             if len(valid_tokens) == 0:
                 continue
-            
+
             # Detokenize
             peptide = "".join(
-                self.tokenizer.detokenize(torch.unsqueeze(valid_tokens, 0), join=False)[0]
+                self.tokenizer.detokenize(
+                    torch.unsqueeze(valid_tokens, 0), join=False
+                )[0]
             )
-            
+
             # Peptide score
             peptide_score = float(np.mean(valid_scores))
-            
+
             # Reverse if needed
             if self.tokenizer.reverse:
                 valid_scores = valid_scores[::-1]
             valid_scores_list = valid_scores.tolist()
-            
+
             # Create PSM
             spec_match = psm.PepSpecMatch(
                 sequence=peptide,
@@ -535,12 +539,16 @@ class Spec2Pep(pl.LightningModule):
                 aa_scores=valid_scores,
             )
             predictions.append(spec_match)
-            
+
             trimmed_conf_str = str(valid_scores_list).replace(",", ";")
-            scan_str = str(scan).split("\n")[-1] if "\n" in str(scan) else str(scan)
-            
+            scan_str = (
+                str(scan).split("\n")[-1] if "\n" in str(scan) else str(scan)
+            )
+
             with open("nonar_predictions.csv", "a") as out:
-                out.write(f"{scan_str}, {peptide}, {peptide_score}, {trimmed_conf_str}\n")
+                out.write(
+                    f"{scan_str}, {peptide}, {peptide_score}, {trimmed_conf_str}\n"
+                )
 
         return predictions
 
