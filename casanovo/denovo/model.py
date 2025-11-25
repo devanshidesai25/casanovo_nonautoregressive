@@ -337,8 +337,12 @@ class Spec2Pep(pl.LightningModule):
         """
 
         pred, truth = self._forward_step(batch)
-
+    
+        batch_size, seq_len = truth.shape
+        pred = pred[:, :seq_len, :]  
+    
         pred = pred.reshape(-1, self.vocab_size)
+        truth = truth.flatten()
         
         if mode == "train":
             loss = self.celoss(pred, truth.flatten())
