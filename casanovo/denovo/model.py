@@ -271,8 +271,7 @@ class Spec2Pep(pl.LightningModule):
         mzs = batch["mz_array"]
         intensities = batch["intensity_array"]
         seqs = batch.get("seq")
-        print("sequences")
-        print(seqs)
+
         return mzs, intensities, precursors, seqs
 
     def _forward_step(
