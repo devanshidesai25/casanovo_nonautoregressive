@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ## [Unreleased]
 
+### Added
+
+- A TSV file with all candidate peptides can be exported during database searching with the `--export` flag.
+
 ### Changed
 
 - Increased minimum Python version from 3.8 to 3.10.
