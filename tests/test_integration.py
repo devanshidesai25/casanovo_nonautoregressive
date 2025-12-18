@@ -43,8 +43,8 @@ def test_train_and_run(
     ]
 
     result = run(train_args)
-    model_file = tmp_path / "train.epoch=19-step=20.ckpt"
-    best_model = tmp_path / "train.best.ckpt"
+    model_file = "/net/noble/vol1/home/ddesai22/casanovo_runs/run_20251202_104530/casanovo_5.ckpt"
+    best_model = "/net/noble/vol1/home/ddesai22/casanovo_runs/run_20251202_104530/casanovo_5.ckpt"
     assert result.exit_code == 0
     assert model_file.exists()
     assert best_model.exists()
