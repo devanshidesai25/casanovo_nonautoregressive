@@ -23,7 +23,11 @@ def test_train_and_run(
     tiny_fasta_file,
 ):
     # We can use this to explicitly test different versions.
-    monkeypatch.setattr(casanovo, "__version__", "3.0.1")
+    monkeypatch.setattr(
+        casanovo,
+        "__version__",
+        "5.0.1.dev4+gd3cbe0b02.d20251008",
+    )
 
     # Run a command.
     run = functools.partial(
@@ -43,8 +47,8 @@ def test_train_and_run(
     ]
 
     result = run(train_args)
-    model_file = "/net/noble/vol1/home/ddesai22/casanovo_runs/run_20251202_104530/casanovo_5.ckpt"
-    best_model = "/net/noble/vol1/home/ddesai22/casanovo_runs/run_20251202_104530/casanovo_5.ckpt"
+    model_file = tmp_path / "train.epoch=19-step=20.ckpt"
+    best_model = tmp_path / "train.best.ckpt"
     assert result.exit_code == 0
     assert model_file.exists()
     assert best_model.exists()
