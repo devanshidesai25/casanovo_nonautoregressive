@@ -423,42 +423,42 @@ class Spec2Pep(pl.LightningModule):
     ) -> List[psm.PepSpecMatch]:
         """
         A single prediction step (non-autoregressive with N-term check).
-        
+
         Parameters
         ----------
         batch : Dict[str, torch.Tensor]
             A batch from the SpectrumDataset, containing keys:
             ``mz_array``, ``intensity_array``, ``precursor_mz``, ``precursor_charge``,
             plus metadata like ``peak_file`` and ``scan_id``.
-        
+
         Returns
         -------
         predictions : List[psm.PepSpecMatch]
             Predicted PSMs for the given batch of spectra.
         """
         # Forward pass
-        logits, _ = self._forward_step(batch)     # logits: (B, L, V)
+        logits, _ = self._forward_step(batch)  # logits: (B, L, V)
         device = logits.device
         batch_size, L, V = logits.shape
-        
+
         # N-term indices
         nterm_idx = self.nterm_idx.to(device)
         nterm_set = set(nterm_idx.tolist())
-        
+
         # Probabilities and argmax tokens
-        probs = torch.softmax(logits, dim=-1)       # (B, L, V)
-        predicted_tokens = probs.argmax(dim=-1)     # (B, L)
-        
+        probs = torch.softmax(logits, dim=-1)  # (B, L, V)
+        predicted_tokens = probs.argmax(dim=-1)  # (B, L)
+
         # Per-AA confidence
-        per_aa_conf = probs.gather(
-            -1, predicted_tokens.unsqueeze(-1)
-        ).squeeze(-1)                               # (B, L)
-        
+        per_aa_conf = probs.gather(-1, predicted_tokens.unsqueeze(-1)).squeeze(
+            -1
+        )  # (B, L)
+
         # N-term cleanup for non-reverse tokenizer
         if not self.tokenizer.reverse and L > 1:
             mask = torch.isin(predicted_tokens[:, 1:], nterm_idx)
             predicted_tokens[:, 1:][mask] = 0
-        
+
         # N-term fix for reverse tokenizer
         if self.tokenizer.reverse:
             for b in range(batch_size):
@@ -468,10 +468,10 @@ class Spec2Pep(pl.LightningModule):
                     if t == self.stop_token or t == 0:
                         stop_pos = j
                         break
-                
+
                 # Allowed N-term mod position = stop_pos - 1
                 valid_pos = max(0, stop_pos - 1)
-                
+
                 # For all positions before STOP:
                 for j in range(stop_pos):
                     tok = int(predicted_tokens[b, j].item())
@@ -480,15 +480,19 @@ class Spec2Pep(pl.LightningModule):
                         masked = logits[b, j].clone()
                         masked[nterm_idx] = -float("inf")
                         newtok = masked.argmax()
-                        newtok_idx = int(newtok.item())  # Fixed: convert to int
-                        
+                        newtok_idx = int(
+                            newtok.item()
+                        )  # Fixed: convert to int
+
                         predicted_tokens[b, j] = newtok
                         # New confidence
                         new_probs = torch.softmax(masked, dim=0)
-                        per_aa_conf[b, j] = new_probs[newtok_idx]  # Fixed: use int index
-        
+                        per_aa_conf[b, j] = new_probs[
+                            newtok_idx
+                        ]  # Fixed: use int index
+
         predictions: List[psm.PepSpecMatch] = []
-        
+
         for (
             filename,
             scan,
@@ -510,25 +514,25 @@ class Spec2Pep(pl.LightningModule):
                 if t == self.stop_token or t == 0:
                     stop_pos = j
                     break
-            
+
             valid_tokens = tokens[:stop_pos]
             valid_scores = confs[:stop_pos].detach().cpu().numpy()
-            
+
             if len(valid_tokens) == 0:
                 continue
-            
+
             # Detokenize (ensure CPU)
             valid_tokens_cpu = valid_tokens.detach().cpu().unsqueeze(0)
             peptide = "".join(
                 self.tokenizer.detokenize(valid_tokens_cpu, join=False)[0]
             )
-            
+
             # Reverse score order if needed
             if self.tokenizer.reverse:
                 valid_scores = valid_scores[::-1]
-            
+
             pep_score = float(valid_scores.mean())
-            
+
             # Build PSM
             spec_match = psm.PepSpecMatch(
                 sequence=peptide,
@@ -539,9 +543,9 @@ class Spec2Pep(pl.LightningModule):
                 exp_mz=float(prec_mz.item()),
                 aa_scores=valid_scores,
             )
-            
+
             predictions.append(spec_match)
-        
+
         return predictions
 
     def on_train_epoch_end(self) -> None:
