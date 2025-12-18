@@ -12,7 +12,6 @@ from typing import Iterable, List, Optional, Sequence, Union
 import lightning.pytorch as pl
 import lightning.pytorch.loggers
 import torch
-import torch.utils.data
 from depthcharge.tokenizers import PeptideTokenizer
 from depthcharge.tokenizers.peptides import MskbPeptideTokenizer
 from lightning.pytorch.callbacks import LearningRateMonitor, ModelCheckpoint
@@ -218,27 +217,27 @@ class ModelRunner:
 
         for batch in test_dataloader:
             for peak_file, scan_id, true_seq in zip(
-                batch["peak_file"], batch["scan_id"], batch["seq"]
+                batch["peak_file"],
+                batch["scan_id"],
+                self.tokenizer.detokenize(batch["seq"], join=False),
             ):
-                true_seqs.append(true_seq.cpu().detach().numpy())
+                true_seqs.append(true_seq)
                 if pred_i < len(self.writer.psms) and self.writer.psms[
                     pred_i
                 ].spectrum_id == (peak_file, scan_id):
-                    pred_tokens = self.model.tokenizer.tokenize(
-                        self.writer.psms[pred_i].sequence
-                    ).squeeze(0)
-                    pred_seqs.append(pred_tokens.cpu().detach().numpy())
+                    curr_pred = self.tokenizer.tokenize(
+                        self.writer.psms[pred_i].sequence, to_strings=True
+                    )[0]
+                    if self.tokenizer.reverse:
+                        curr_pred = curr_pred[::-1]
+
+                    pred_seqs.append(curr_pred)
                     pred_i += 1
                 else:
                     pred_seqs.append(None)
 
-        aa_masses = {
-            aa_token: self.model.tokenizer.residues[aa]
-            for aa, aa_token in self.model.tokenizer.index.items()
-            if aa in self.model.tokenizer.residues
-        }
         aa_precision, aa_recall, pep_precision = aa_match_metrics(
-            *aa_match_batch(true_seqs, pred_seqs, aa_masses)
+            *aa_match_batch(true_seqs, pred_seqs, self.tokenizer.residues)
         )
 
         if self.config["top_match"] > 1:
@@ -407,10 +406,19 @@ class ModelRunner:
         else:
             tokenizer_clss = PeptideTokenizer
 
+        missing_aa = list(
+            set(self.config.residues) - set(tokenizer_clss.residues)
+        )
+        if missing_aa:
+            logger.warning(
+                "Configured residue(s) not in model alphabet: %s",
+                ", ".join(missing_aa),
+            )
+
         self.tokenizer = tokenizer_clss(
             residues=self.config.residues,
             replace_isoleucine_with_leucine=self.config.replace_isoleucine_with_leucine,
-            reverse=self.config.reverse_peptides,
+            reverse=True,
             start_token=None,
             stop_token="$",
         )
@@ -503,7 +511,10 @@ class ModelRunner:
         model_clss = DbSpec2Pep if db_search else Spec2Pep
         try:
             self.model = model_clss.load_from_checkpoint(
-                self.model_filename, map_location=device, **loaded_model_params
+                self.model_filename,
+                map_location=device,
+                weights_only=False,
+                **loaded_model_params,
             )
             # Use tokenizer initialized from config file instead of loaded
             # from checkpoint file.
@@ -513,12 +524,18 @@ class ModelRunner:
             )
             for param in architecture_params:
                 if model_params[param] != self.model.hparams[param]:
-                    warnings.warn(
-                        f"Mismatching {param} parameter in "
-                        f"model checkpoint ({self.model.hparams[param]}) "
-                        f"vs config file ({model_params[param]}); "
-                        "using the checkpoint."
-                    )
+                    if param == "tokenizer":
+                        self._verify_tokenizer(
+                            model_params[param], self.model.hparams[param]
+                        )
+                    else:
+                        logger.warning(
+                            "Mismatching %s parameter in model checkpoint (%s) vs"
+                            " config file (%s); using the checkpoint.",
+                            param,
+                            self.model.hparams[param],
+                            model_params[param],
+                        )
         except RuntimeError:
             # This only doesn't work if the weights are from an older
             # version.
@@ -526,6 +543,7 @@ class ModelRunner:
                 self.model = model_clss.load_from_checkpoint(
                     self.model_filename,
                     map_location=device,
+                    weights_only=False,
                     **model_params,
                 )
                 self.model.tokenizer = tokenizer
@@ -591,6 +609,24 @@ class ModelRunner:
             shuffle_buffer_size=self.config.shuffle_buffer_size,
             n_workers=self.config.n_workers,
             lance_dir=lance_dir,
+        )
+
+    @staticmethod
+    def _verify_tokenizer(
+        checkpoint: PeptideTokenizer, config: PeptideTokenizer
+    ) -> None:
+        """Verify that two tokenizers are equivalent"""
+        if checkpoint.residues != config.residues:
+            mismatch_reason = "residues and/or residue masses"
+        elif checkpoint.index != config.index:
+            mismatch_reason = "residue indices"
+        else:
+            return
+
+        logger.warning(
+            "Mismatching %s in model checkpoint tokenizer vs config file tokenizer;"
+            " using the checkpoint tokenizer.",
+            mismatch_reason,
         )
 
     def _get_input_paths(
